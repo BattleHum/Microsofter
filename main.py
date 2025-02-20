@@ -1,82 +1,140 @@
 import itertools
+import random
+import os
+import time
+from datetime import datetime
 from string import digits, punctuation, ascii_letters
 import win32com.client as client
-from datetime import datetime
-import time
 
+# Словник для розпізнавання типу файлу
+OFFICE_APPS = {
+    "xlsx": "Excel.Application",
+    "xls": "Excel.Application",
+    "docx": "Word.Application",
+    "doc": "Word.Application",
+    "pptx": "PowerPoint.Application",
+    "ppt": "PowerPoint.Application",
+    "pst": "Outlook.Application",
+    "ost": "Outlook.Application",
+    "one": "OneNote.Application"
+}
 
-def brute_excel_doc():
+def detect_office_app(file_path):
+    """Визначає, який додаток Office використовувати для файлу"""
+    ext = file_path.split('.')[-1].lower()
+    return OFFICE_APPS.get(ext)
+
+def generate_passwords(symbols, min_length, max_length, random_mode=False):
+    """Генерує паролі: за допомогою itertools або випадковим методом"""
+    if random_mode:
+        while True:
+            length = random.randint(min_length, max_length)
+            yield ''.join(random.choice(symbols) for _ in range(length))
+    else:
+        for length in range(min_length, max_length + 1):
+            for password in itertools.product(symbols, repeat=length):
+                yield "".join(password)
+
+def brute_force_office():
+    """Функція підбору паролю для офісних файлів"""
     try:
-        app = input(r"Введіть шлях де розташований файл: ")
-    except:
-        print("Введи правильний шлях!")
+        file_path = input(r"Введіть шлях до файлу: ").strip()
+        if not os.path.exists(file_path):
+            print("Файл не знайдено! Переконайтеся, що шлях правильний.")
+            return
+    except Exception as e:
+        print(f"Помилка: {e}")
+        return
+
+    office_app = detect_office_app(file_path)
+    if not office_app:
+        print("Непідтримуваний тип файлу.")
+        return
 
     try:
-        password_length = input("Введіть довжину паролю, наприклад 1-5: ")
-        password_length = [int(item) for item in password_length.split("-")]
-    except:
-        print("Перевірте данні")
+        password_length = input("Введіть довжину паролю (наприклад 1-5): ").strip()
+        min_length, max_length = map(int, password_length.split("-"))
+        if min_length > max_length:
+            print("Неправильний формат довжини паролю.")
+            return
+    except ValueError:
+        print("Перевірте формат вводу (наприклад: 1-5).")
+        return
 
-    print("Якщо пароль містить тільки цифри введіть: 1\nЯкщо пароль иістить тільки букви введіть: 2\n"
-          "Якщо пароль містить і букви і цифри введіть: 3\nЯкщо пароль містить і цифри, і букви і спец.символи введіть: 4\n"
-          "Якщо пароь містить цифри і спец.символи введіть: 5\nЯкщо пароль містить букви і спец.символи введіть: 6\n"
-          )
+    print(
+        "Виберіть формат паролю:\n"
+        "1 - тільки цифри\n"
+        "2 - тільки букви\n"
+        "3 - букви + цифри\n"
+        "4 - букви + цифри + спец. символи\n"
+        "5 - цифри + спец. символи\n"
+        "6 - букви + спец. символи\n"
+        "random - випадковий набір символів\n"
+        "random_full - повністю випадкові паролі (різна довжина + змішані символи)\n"
+    )
 
-    try:
-        choice = int(input(": "))
-        if choice == 1:
-            possible_symbols = digits
-        elif choice == 2:
-            possible_symbols = ascii_letters
-        elif choice == 3:
-            possible_symbols = digits + ascii_letters
-        elif choice == 4:
-            possible_symbols = digits + ascii_letters + punctuation
-        elif choice == 5:
-            possible_symbols = digits + punctuation
-        elif choice == 6:
-            possible_symbols = ascii_letters + punctuation
-        else:
-            possible_symbols = "???"
-    except:
-        print("???")
-    # brute excel doc
+    choice = input(": ").strip()
+
+    symbol_sets = {
+        "1": digits,
+        "2": ascii_letters,
+        "3": digits + ascii_letters,
+        "4": digits + ascii_letters + punctuation,
+        "5": digits + punctuation,
+        "6": ascii_letters + punctuation,
+    }
+
+    random_mode = False
+    if choice in symbol_sets:
+        possible_symbols = symbol_sets[choice]
+    elif choice == "random":
+        possible_symbols = random.choice([digits, ascii_letters, digits + ascii_letters, digits + punctuation])
+    elif choice == "random_full":
+        possible_symbols = digits + ascii_letters + punctuation
+        random_mode = True
+    else:
+        print("Невідомий вибір!")
+        return
+
+    # Початок перебору
     start_timestamp = time.time()
-    print(f"Started at - {datetime.utcfromtimestamp(time.time()).strftime('%H:%M:%S')}")
+    print(f"Початок роботи: {datetime.now().strftime('%H:%M:%S')}")
 
     count = 0
-    for pass_length in range(password_length[0], password_length[1] + 1):
-        for password in itertools.product(possible_symbols, repeat=pass_length):
-            password = "".join(password)
+    office_instance = client.Dispatch(office_app)
 
+    for password in generate_passwords(possible_symbols, min_length, max_length, random_mode):
+        count += 1
 
-            opened_doc = client.Dispatch("Excel.Application")
-            count += 1
+        try:
+            if "Excel" in office_app:
+                office_instance.Workbooks.Open(file_path, False, True, None, password)
+            elif "Word" in office_app:
+                office_instance.Documents.Open(file_path, False, True, None, password)
+            elif "PowerPoint" in office_app:
+                office_instance.Presentations.Open(file_path, False, True, None, password)
+            elif "Outlook" in office_app:
+                office_instance.Session.Logon(file_path, password, False, True)
+            elif "OneNote" in office_app:
+                # OneNote не підтримує пряме відкриття за паролем, тут потрібно API Microsoft Graph
+                print("OneNote захищені паролем файли потребують спеціального API.")
+                return
 
-            try:
-                opened_doc.Workbooks.Open(
-                    app,
-                    False,
-                    True,
-                    None,
-                    password
-                )
+            print(f"Пароль знайдено: {password}")
+            print(f"Час: {time.time() - start_timestamp:.2f} секунд")
+            return f"Спроба #{count}, пароль: {password}"
 
-                time.sleep(0.1)
-                print(f"Finished at - {datetime.utcfromtimestamp(time.time()).strftime('%H:%M:%S')}")
-                print(f"Password cracking time - {time.time() - start_timestamp}")
+        except:
+            print(f"Спроба #{count}, неправильний пароль: {password}")
 
-                return f"Attempt #{count} Password is: {password}"
+        # Логування в файл
+        with open("passwords_log.txt", "a", encoding="utf-8") as file:
+            file.write(f'Спроба #{count} | Пароль: {password}\n')
 
-            except:
-                print(f"Attempt #{count} Incorrect password: {password}")
-                pass
+    print("Перебір завершено. Пароль не знайдено.")
 
-            with open(file="Password (Excel)", mode="a", encoding="utf-8") as file:
-                 file.write(f'Password: {password}\n{"#" * 20}\n')
 def main():
-    print(brute_excel_doc())
-
+    print(brute_force_office())
 
 if __name__ == '__main__':
     main()
